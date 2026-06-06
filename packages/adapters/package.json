@@ -14,5 +14,9 @@
   },
   "dependencies": {
     "@markaz/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "vitest": "^3.0.0"
   }
 }
