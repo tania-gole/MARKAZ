@@ -10,6 +10,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --config vitest.integration.config.ts --passWithNoTests",
+    "db:seed": "dotenv -e ../../.env -- tsx scripts/seed.ts",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {

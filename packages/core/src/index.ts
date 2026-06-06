@@ -3,6 +3,7 @@ import { db } from '@markaz/db';
 
 export * from './engine';
 export * from './ledger';
+export * from './rbac';
 
 export function validatePing(input: unknown): Ping {
   return PingSchema.parse(input);

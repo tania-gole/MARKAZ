@@ -27,8 +27,11 @@ export async function registerUser(
   const passwordHash = await hashPassword(plainPassword);
   // select PUBLIC_USER_SELECT projects to exactly PublicUser at the DB level —
   // passwordHash / emiratesIdEnc / emiratesIdHash never enter memory in this code path.
+  // Nested create on `party` makes both rows in one DB transaction; every
+  // registered User has a Party of kind 'person', satisfying the required
+  // partyId column (post require_user_party migration).
   const user = await db.user.create({
-    data: { email, passwordHash },
+    data: { email, passwordHash, party: { create: { kind: 'person' } } },
     select: PUBLIC_USER_SELECT,
   });
   const { token, expiresAt } = await createSession(user.id);

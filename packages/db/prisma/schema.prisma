@@ -28,13 +28,15 @@ model User {
   emiratesIdEnc   Bytes?   @map("emirates_id_enc")
   emiratesIdHash  String?  @unique @map("emirates_id_hash")
   residencyStatus String?  @map("residency_status")
-  // Nullable in this migration; the migration's SQL backfills a Party row for
-  // every existing User. Week 2 flips this to required once backfill is proven.
-  partyId         String?  @unique @map("party_id")
+  // Required per design rule 5: identity is separate from role, every User
+  // has a Party so userOwns can resolve User -> Party -> Ownership reliably.
+  // The require_user_party migration ran a defensive backfill before the
+  // SET NOT NULL, then promoted this column to required.
+  partyId         String   @unique @map("party_id")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  party             Party?     @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  party             Party      @relation(fields: [partyId], references: [id], onDelete: Cascade)
   sessions          Session[]
   roles             UserRole[]
   uploadedDocuments Document[]
