@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '@markaz/db';
 
 /**
  * A guard is a pure function evaluated before a transition fires. Returns true

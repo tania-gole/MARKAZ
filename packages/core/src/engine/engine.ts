@@ -1,5 +1,4 @@
-import { db } from '@markaz/db';
-import { Prisma } from '@prisma/client';
+import { db, Prisma } from '@markaz/db';
 import type {
   EngineRegistry,
   Machine,

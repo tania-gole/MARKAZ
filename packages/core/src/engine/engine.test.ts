@@ -18,10 +18,9 @@ vi.mock('@markaz/db', () => ({
       });
     },
   },
-}));
-
-// Mock @prisma/client: only Prisma.DbNull is used at runtime by engine.ts.
-vi.mock('@prisma/client', () => ({
+  // Prisma re-exported from @markaz/db (the single architectural seam to the ORM).
+  // Only Prisma.DbNull is used at runtime by engine.ts; the sentinel shape here
+  // matches what engine.ts compares against (it just passes it to tx.event.create).
   Prisma: { DbNull: { __DbNull: true } },
 }));
 

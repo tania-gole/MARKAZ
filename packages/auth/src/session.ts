@@ -1,6 +1,6 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { db } from '@markaz/db';
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '@markaz/db';
 
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
