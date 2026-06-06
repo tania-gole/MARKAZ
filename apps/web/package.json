@@ -3,8 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "echo 'noop: @markaz/web'",
-    "dev": "echo 'noop: @markaz/web'",
+    "build": "next build",
+    "dev": "next dev --port 3000",
+    "start": "next start --port 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
@@ -12,6 +13,13 @@
   },
   "dependencies": {
     "@markaz/core": "workspace:*",
-    "@markaz/types": "workspace:*"
+    "@markaz/types": "workspace:*",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
   }
 }

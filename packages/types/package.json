@@ -12,6 +12,9 @@
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist .turbo"
   },
+  "dependencies": {
+    "zod": "^3.0.0"
+  },
   "devDependencies": {
     "vitest": "^3.0.0"
   }
