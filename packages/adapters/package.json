@@ -1,0 +1,18 @@
+{
+  "name": "@markaz/adapters",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'noop: @markaz/adapters'",
+    "dev": "echo 'noop: @markaz/adapters'",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@markaz/types": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@markaz/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'noop: @markaz/web'",
+    "dev": "echo 'noop: @markaz/web'",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf .next dist .turbo"
+  },
+  "dependencies": {
+    "@markaz/core": "workspace:*",
+    "@markaz/types": "workspace:*"
+  }
+}
