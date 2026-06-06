@@ -1,0 +1,20 @@
+# Keep these out of Claude Code's context to save tokens and avoid noise.
+node_modules/
+.next/
+dist/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+*.log
+
+# Secrets and env (never load)
+.env
+.env.*
+!.env.example
+
+# Generated
+packages/db/generated/
+
+# Lockfile is large and rarely useful as context
+pnpm-lock.yaml
