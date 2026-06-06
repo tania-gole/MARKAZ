@@ -15,5 +15,8 @@
   "dependencies": {
     "@markaz/db": "workspace:*",
     "@markaz/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
   }
 }
