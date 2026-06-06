@@ -292,3 +292,53 @@ model Event {
   @@index([createdAt])
   @@map("event")
 }
+
+model Posting {
+  id             String   @id @default(uuid())
+  // Aggregate reference mirrors Event.aggregateType / aggregateId so a deal's
+  // ledger and its audit log hang off the same id. Not a polymorphic FK; the
+  // app validates the aggregate exists when posting.
+  aggregateType  String   @map("aggregate_type")
+  aggregateId    String   @map("aggregate_id")
+  description    String
+  // Plain string, NOT an FK. Same append-only audit semantics as Event.
+  actorId        String?  @map("actor_id")
+  // Single currency per posting. SUM == 0 balance check only makes sense
+  // within one currency; per-line currency + a single cross-line sum would
+  // be inconsistent. Multi-currency means multiple postings.
+  currency       String   @default("AED")
+  // Optional idempotency key. Unique-indexed so a double post fast-fails at
+  // the DB constraint level even if our app-level pre-check loses a race.
+  // (Future reversals: when those become real, add an explicit
+  // reversalOfPostingId String? rather than encoding intent in description.)
+  idempotencyKey String?  @unique @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  lines PostingLine[]
+
+  @@index([aggregateType, aggregateId])
+  @@index([createdAt])
+  @@map("posting")
+}
+
+model PostingLine {
+  id          String   @id @default(uuid())
+  postingId   String   @map("posting_id")
+  // Validated against ACCOUNT_CODES in packages/core/src/ledger/accounts.ts.
+  // String column (config-driven, not a Postgres enum), so adding an account
+  // is a code change, not a migration.
+  accountCode String   @map("account_code")
+  // Signed Decimal. Positive = debit, negative = credit (single-column
+  // representation so "this posting balances" is SUM(amount) = 0). Decimal,
+  // not Float — exact arithmetic, no drift. NUMERIC(14, 2) rounds on store,
+  // so the API rejects sub-cent input via AmountScaleError; the in-app
+  // balance check runs at the same 2dp scale that gets stored.
+  amount      Decimal  @db.Decimal(14, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  posting Posting @relation(fields: [postingId], references: [id], onDelete: Restrict)
+
+  @@index([postingId])
+  @@index([accountCode])
+  @@map("posting_line")
+}
