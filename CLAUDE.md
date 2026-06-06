@@ -16,29 +16,31 @@ A previous MVP exists as a **read-only reference**. We are **building fresh**; d
 - Do NOT carry its debt: single `seller_id` (breaks design rule 2), no ledger (rule 4), identity fused with role + ad-hoc RBAC (rule 5), hand-rolled non-reusable state machine (rule 3), no migrations, fake-success stubs, demo-login always on, unguarded admin endpoints, PII plaintext, no tests/CI.
 
 ## Tech stack
-- Monorepo: pnpm workspaces + Turborepo.
-- Web portal and admin panel: Next.js (App Router, React, TypeScript). **Two separate apps**, not one.
+- Monorepo: pnpm workspaces + Turborepo (v2 `tasks` key, not v1 `pipeline`). Node 24 LTS pinned via `.nvmrc` + `engines`; pnpm 10.18.0 via corepack (`packageManager` field in root `package.json`).
+- Web portal and admin panel: Next.js 15 (App Router, React 19, TypeScript). **Two separate apps**, not one. Web on port 3000, admin on 3001.
 - Mobile (later): Expo / React Native.
-- Database: PostgreSQL via Prisma. Validation: Zod (shared). Styling: Tailwind.
-- Auth: **self-hosted**, session-based (argon2id + httpOnly/Secure/SameSite cookies), identity stored in our own Postgres.
+- Database: PostgreSQL 16 via Prisma 6 (parity with the eventual UAE-region managed Postgres). Local dev: `docker compose -f infrastructure/docker/docker-compose.yml up -d` (host port 5433 to coexist with any system Postgres). Validation: Zod (shared). Styling: Tailwind (introduced when the first real UI lands in Week 3).
+- Auth: **self-hosted**, session-based (argon2id via `@node-rs/argon2` prebuilt binaries — no node-gyp; opaque 32-byte tokens hashed via SHA-256 before DB storage; httpOnly/SameSite=lax/Secure-gated-on-NODE_ENV cookies), identity stored in our own Postgres.
 - **Hosting/region: UAE only (locked).** Database and document storage in a UAE region (AWS me-central-1, Azure UAE, or a UAE VPS). Web on Vercel. **Supabase is ruled out** (no UAE region). **No separate NestJS API** — business logic lives in `packages/core`, called by thin Next.js handlers.
 
 ## Repo layout
-- `apps/web` — customer-facing Home portal (public, seller, buyer route groups)
-- `apps/admin` — internal operations/admin panel (separate app: distinct access + security boundary)
-- `apps/mobile` — Expo app (later)
-- `packages/core` — domain logic: workflow engine, ledger, RBAC, ROI. Framework-agnostic, the only place business rules live.
-- `packages/db` — Prisma schema + migrations + client (the only code that talks to Postgres)
-- `packages/types` — shared types and Zod schemas (one definition per shape)
-- `packages/adapters` — integration interfaces (e-sign, identity/UAE PASS, Trakheesi, DLD, payment), each with a manual/stub impl now and a real one later
-- `packages/auth` — self-hosted auth + RBAC enforcement helpers (guards, ownership checks)
-- `packages/ui` — shared React components + design tokens
-- `packages/notifications` — email now, push/SMS later, behind an interface
-- `packages/config` — shared ESLint / TypeScript / Tailwind config
-- `packages/i18n` — English only now; a stub seam for Arabic/RTL later (no RTL work now)
-- `infrastructure/docker` — local Postgres (and MinIO for storage later)
-- `docs/` — architecture, ADRs, story specs, diagrams (Mermaid in `docs/diagrams/`)
-- `tests/` — integration and e2e
+**Built:**
+- `apps/web` — customer-facing Home portal (`(public)` / `(seller)` / `(buyer)` route groups, port 3000).
+- `apps/admin` — internal operations/admin panel (port 3001; separate app for the security boundary).
+- `packages/core` — domain logic. Built: workflow engine (`src/engine`), ledger (`src/ledger`), RBAC ownership layer (`src/rbac.ts`). Framework-agnostic; the only place business rules live.
+- `packages/db` — Prisma schema + migrations + singleton client. **The only code that imports `@prisma/client`** — re-exports `Prisma` for every other package.
+- `packages/types` — shared Zod schemas + `ForbiddenError` (the single shared exception class so auth/core stay siblings).
+- `packages/adapters` — integration interfaces. Built: identity (fail-loud stub), esign (manual-recorded). Deferred: gov (route handlers use engine directly; swap-shape mismatch between manual decision-in and real decision-out), payment (no caller yet).
+- `packages/auth` — self-hosted auth + RBAC permission layer. Built: argon2 password hashing, session lifecycle, register/login/logout, encryption stubs for Emirates ID, `PERMISSIONS` registry + `ROLE_PERMISSIONS` matrix, `userHasRole` / `userHasPermission` / `requirePermission`, `seedRbac()`.
+- `infrastructure/docker` — local Postgres 16 (compose project name `markaz`; host port 5433).
+- `docs/` — architecture, ERD, state machines, sequence flows, story specs.
+
+**Deferred (added when their features land — don't scaffold ahead):**
+- `apps/mobile` — Expo. Post-pilot.
+- `packages/ui` — shared React components + design tokens. First real UI in Week 3 will introduce.
+- `packages/notifications` — email / push / SMS behind an interface.
+- `packages/config` — shared ESLint / TS / Tailwind config. Currently root-level config files (`tsconfig.base.json`, `eslint.config.mjs`, `prettier.config.mjs`); promote when Next-specific presets need composition.
+- `packages/i18n` — Arabic / RTL seam.
 
 ## Architectural rules (do not violate without discussion)
 - Business logic lives in `packages/core`, NOT in routes or components. The API is a thin layer that calls core.
@@ -47,6 +49,11 @@ A previous MVP exists as a **read-only reference**. We are **building fresh**; d
 - Money is a **double-entry ledger** from day one, even though Home only records (does not hold) funds for now.
 - Access control is **real role-based permissions** (Operations, Compliance, Support, Admin; Agent later with Premium) plus an ownership check. No single `isAdmin` flag.
 - Every external system sits behind an **adapter interface** in `packages/adapters`. Integrate what is available now; keep licensed ones as recorded manual steps behind the same interface.
+- **Only `@markaz/db` imports `@prisma/client`.** Every other package imports `Prisma` (including `Prisma.Decimal`, `Prisma.DbNull`, `Prisma.TransactionClient`, `Prisma.PostingGetPayload<...>`) from `@markaz/db`. Single ORM seam.
+- **Workflow engine: `createEngine({ aggregateType: { machine, adapter } })`** in `packages/core/src/engine`. Per-aggregate persistence adapters; the engine knows nothing about specific tables. CAS on the status column for concurrency; status update + event insert in one `db.$transaction`. Append-only events enforced through the API surface (`transition()` is the only mutator). Creation events (`null → initialState`) are the feature's responsibility, not the engine's.
+- **Ledger: signed Decimal, two tables, append-only** in `packages/core/src/ledger`. `Posting` carries metadata + currency; `PostingLine.amount` is `Decimal(14,2)`, positive = debit, negative = credit. A posting balances iff `SUM(amount) = 0`. Amounts are strings at the API boundary, sub-cent rejected via `AmountScaleError`, idempotency via optional `idempotencyKey` + unique constraint.
+- **RBAC is TWO composable layers, not one.** `requirePermission(userId, permission)` in `@markaz/auth` (`PERMISSIONS` registry + `ROLE_PERMISSIONS` matrix in code; Admin lists every permission explicitly — no wildcard bypass); `requireOwnership(userId, resource)` in `@markaz/core` (per-resource resolver registry, no big switch; `ResourceType = property | listing | offer`, transaction deferred). Route handlers compose per action — AND, OR, conditional. No `canUserDoX` combiner. `ForbiddenError` lives in `@markaz/types`.
+- **PII never plaintext.** Emirates ID stored as `Bytes` ciphertext (`emiratesIdEnc`) + deterministic SHA-256 hash for lookup (`emiratesIdHash`). Encryption helpers in `@markaz/auth` throw until Week 3 wires real crypto — no path silently stores plaintext. Errors that touch PII inputs (identity adapter, hash helpers) never echo the input.
 
 ## Design rules that keep Home Invest-ready (preserve these)
 1. Property-first: the Property is the permanent record; listings, transactions, tenancies, ownership are time-bounded relationships on it.
@@ -65,12 +72,16 @@ A previous MVP exists as a **read-only reference**. We are **building fresh**; d
 - Integrations: real now where available (Form A e-sign; likely UAE PASS). Licensed steps (Trakheesi, DLD) are manual + recorded behind adapters.
 
 ## Conventions
-- TypeScript strict mode. No `any` without a written reason.
+- TypeScript strict mode. No `any` without a written reason. Strict flags in `tsconfig.base.json`: `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `exactOptionalPropertyTypes`, `noFallthroughCasesInSwitch`, `noPropertyAccessFromIndexSignature`, `verbatimModuleSyntax`. Consequences worth knowing: `process.env['X']` not `process.env.X`; `import type` for type-only imports; conditional spread (`...(x !== undefined ? { x } : {})`) for optional fields handed to Prisma.
 - 2-space indent. Follow ESLint + Prettier; do not fight the formatter.
-- Naming: components PascalCase, vars/functions camelCase, files kebab-case, DB tables snake_case.
-- Every schema change is a Prisma migration. Never edit the database by hand.
+- Naming: components PascalCase, vars/functions camelCase, files kebab-case, DB tables snake_case via `@@map` / `@map` (Prisma models stay PascalCase, fields camelCase; SQL gets `user`, `password_hash`, etc.).
+- Every schema change is a Prisma migration. Never edit the database by hand. For destructive Prisma renames (e.g. `@@map` rename of a table with data), use `prisma migrate dev --create-only`, hand-edit the SQL to `ALTER TABLE RENAME`, then apply.
 - Validate all external input with a Zod schema at the boundary.
+- **Status / kind / accountCode / role columns are strings, not Postgres enums.** Adding a value is config, never `ALTER TYPE`. App-side `as const` tuples + Zod recover compile-time safety.
+- **Money is `Decimal(14, 2)` everywhere. Never Float.** Shares are `Decimal(10, 8)`. Decimal arithmetic via `Prisma.Decimal` (imported from `@markaz/db`).
 - Tests for domain logic in `packages/core`. A new workflow transition or ledger rule needs a test. Cover the two spine flows (seller lists; buyer offer to atomic acceptance) first.
+- **Test naming: `*.test.ts`** runs locally + CI without DB (mocks where needed). **`*.integration.test.ts`** runs only via `pnpm test:integration` (excluded by root `vitest.config.ts`; included by per-package `vitest.integration.config.ts`). DB-touching tests stay in the integration tier.
+- Stage `pnpm-lock.yaml` whenever any `package.json` deps change — CI's `--frozen-lockfile` rejects drift.
 - **English only for the pilot. No Arabic / RTL work now** — leave the i18n seam, but do not translate or build RTL.
 - Australian/British spelling in copy. Amounts in AED. No em dashes in written docs.
 
@@ -84,24 +95,44 @@ A previous MVP exists as a **read-only reference**. We are **building fresh**; d
 - **Skills (`.claude/skills/`) and subagents (`.claude/agents/`):** add once patterns stabilise (e.g. a "prisma-migration" skill, a "core-domain-module" skill, a code-reviewer subagent). Do not pre-build these in week 1.
 
 ## Commands
-<!-- Update once the repo is scaffolded. -->
-- Install `pnpm install` · Dev `pnpm dev` · Build `pnpm build` · Lint `pnpm lint` · Test `pnpm test` · Typecheck `pnpm typecheck`
-- DB migrate (dev) `pnpm db:migrate` · Generate Prisma client `pnpm db:generate`
+- **Daily:** `pnpm dev` (runs both apps) · `pnpm build` · `pnpm lint` · `pnpm test` (unit) · `pnpm typecheck`
+- **DB (require local Postgres up):** `docker compose -f infrastructure/docker/docker-compose.yml up -d` · `pnpm db:migrate` · `pnpm db:generate` · `pnpm db:seed` (idempotent RBAC seed)
+- **Integration tests** (require local Postgres + DATABASE_URL): `pnpm test:integration` (root wrapper loads `.env`)
+- **Formatting:** `pnpm format` (Prettier write) · `pnpm format:check`
+- **Setup / housekeeping:** `pnpm install` · `pnpm clean`
 
 ## Workflow expectations
-- Run `pnpm lint` and `pnpm test` before a change is considered done.
+- Run `pnpm lint` and `pnpm test` before a change is considered done. If the change touches the DB or domain logic, also `pnpm test:integration`.
 - Plan non-trivial, multi-file changes before editing. Small, reviewable commits.
 - When touching `packages/core` or `packages/db`, check the change against the Invest-readiness rules above.
+- When `package.json` deps change, stage `pnpm-lock.yaml` in the SAME commit — CI rejects drift via `--frozen-lockfile`.
+- Migrations that warn destructively in non-interactive mode (e.g. tightening a column, renaming via `@@map` with data): generate via `prisma migrate dev --create-only`, hand-edit to add the safe path (`ALTER TABLE RENAME`, defensive `DO $$ ... $$` backfill), then apply.
 
 ## Safety — regulated data (important)
 - Never commit secrets, credentials, `.env` files, or real user data.
-- Never log or print Emirates IDs, Title Deeds, or other PII.
+- Never log or print Emirates IDs, Title Deeds, or other PII. Errors that touch PII inputs (identity adapter, hash helpers) MUST NOT echo the input in `.message`, `.stack`, or own properties. Unit tests assert this.
 - Never run destructive DB commands (drop, truncate, reset, mass delete) against a shared environment. Ask first.
-- Title Deeds, Emirates IDs, KYC docs are access-controlled: buyers must never read them; only Operations/Compliance roles.
+- Title Deeds, Emirates IDs, KYC docs are access-controlled: buyers must never read them; only Operations/Compliance roles. Enforced via the `Document.accessLevel` column + RBAC at read.
 - File uploads need content-type checks, signed URLs, and access scoping. No demo-login in production. Guard every admin endpoint. Rate-limit auth and search.
+- **Encryption fail-loud until wired:** `@markaz/auth.encryptEmiratesId` and `hashEmiratesId` throw until Week 3. Any code path that would store an Emirates ID before then fails loudly — no silent plaintext.
+- **Append-only invariants** (Event log, Posting + PostingLine): enforced through the API surface today — `engine.transition` and `ledger.post` are the only mutators, neither exposes UPDATE/DELETE. DB-level `REVOKE UPDATE, DELETE` is deferred to the security pass; until then, going through the typed APIs is the contract.
+- **`Document` has a DB-level `CHECK` constraint** enforcing exactly-one-parent (property / listing / transaction). Belt and braces beside the app-level helper.
 
 ## Build roadmap (8 weeks to pilot)
-Foundation first (weeks 1-2), then the Home flow. Milestones: **(wk2)** Foundation ready · **(wk5)** Demo-ready · **(wk7)** Pilot candidate · **(wk8)** Pilot-ready. Full Gantt in `docs/diagrams/10-roadmap-gantt.md`. Do not jump to features before the foundation milestone.
+Foundation first (weeks 1-2), then the Home flow. Milestones: **(wk2)** Foundation ready ✓ · **(wk5)** Demo-ready · **(wk7)** Pilot candidate · **(wk8)** Pilot-ready. Full Gantt in `docs/diagrams/10-roadmap-gantt.md`. **Foundation milestone hit** (Blocks A–K below); Week 3 onwards is feature work, starting with MKZ-H-001.
+
+### Foundation built (Blocks A–K, Weeks 1–2)
+- **A · B:** monorepo + tooling — pnpm + Turborepo, strict TS, ESLint flat config, Prettier, Vitest, GitHub Actions CI on PRs.
+- **C:** Next.js 15 in both apps; cross-package consumption proven via `transpilePackages` (types → core → web).
+- **D:** Postgres 16 in Docker; Prisma 6 + first migration; singleton client via `globalThis`; `dotenv-cli` for per-script-cwd env loading.
+- **F:** auth — argon2id passwords (`@node-rs/argon2`), session-based with SHA-256-hashed tokens, register/login/logout, RBAC scaffolding.
+- **G:** property-first data model — User / Party / Property / Ownership / Listing / Offer / Transaction / Document / Event, snake_case tables, encrypted-PII column shape (`emiratesIdEnc` + `emiratesIdHash`), Document CHECK constraint.
+- **H:** workflow engine + listing machine + Postgres service in CI (integration tests run against real DB; CAS concurrency proven).
+- **I:** double-entry ledger — signed Decimal, idempotency keys, atomic Posting + lines, append-only API.
+- **J:** adapter interfaces — identity stub (fail-loud, PII-safe errors) + esign manual; gov + payment deferred to their features.
+- **K:** RBAC enforcement — 8-permission registry + role-permission matrix, `userHasPermission` + `requirePermission` (auth), `userOwns` + `requireOwnership` (core), idempotent `seedRbac`, `partyId` promoted to required after defensive backfill.
+- **E (UAE region):** parked until pre-deploy.
+- Test totals on `main`: ~77 unit, 40 integration, all green local + CI.
 
 ## Context and decisions
 - Source of truth + live decision log: `docs/Markaz-Project-Context.md`.
