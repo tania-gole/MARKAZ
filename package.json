@@ -14,10 +14,13 @@
     "test": "turbo run test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "db:migrate": "pnpm --filter @markaz/db db:migrate",
+    "db:generate": "pnpm --filter @markaz/db db:generate",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "dotenv-cli": "^8.0.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.0.0",
     "globals": "^15.0.0",

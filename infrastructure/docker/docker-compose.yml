@@ -1,0 +1,23 @@
+name: markaz
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: markaz-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: markaz
+      POSTGRES_PASSWORD: markaz_dev
+      POSTGRES_DB: markaz_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U markaz -d markaz_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
