@@ -73,6 +73,23 @@ describe('post() — atomic multi-line insert', () => {
     expect(await db.postingLine.count()).toBe(0);
   });
 
+  it('returns canonical 2dp amount strings regardless of input format', async () => {
+    const result = await ledger.post({
+      aggregateType: 't',
+      aggregateId: '1',
+      description: 'canonical-2dp',
+      actorId: null,
+      lines: [
+        { accountCode: 'commission_receivable', amount: '100' }, // integer input
+        { accountCode: 'commission_revenue', amount: '-100.00' }, // 2dp input
+      ],
+    });
+    for (const line of result.lines) {
+      // Always "<digits>.<exactly two digits>" — toFixed(2) normalises.
+      expect(line.amount).toMatch(/^-?\d+\.\d{2}$/);
+    }
+  });
+
   it('exact 2dp arithmetic: 0.10 + 0.20 + -0.30 balances and stores cleanly', async () => {
     const result = await ledger.post({
       aggregateType: 't',

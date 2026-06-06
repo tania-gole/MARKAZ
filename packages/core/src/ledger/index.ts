@@ -8,6 +8,7 @@ export type {
 export {
   AmountScaleError,
   InsufficientLinesError,
+  InvalidAmountError,
   UnbalancedPostingError,
   UnknownAccountError,
   ZeroAmountLineError,

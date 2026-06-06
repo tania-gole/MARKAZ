@@ -42,6 +42,9 @@ export class UnbalancedPostingError extends Error {
  * pass the in-app check and then store as unbalanced (e.g. +0.014 + 0.014 +
  * -0.028 in app sums to 0; stored as 0.01 + 0.01 + -0.03 = -0.01). Rejecting
  * sub-cent input at the boundary keeps the check in lockstep with storage.
+ *
+ * Detected via Decimal.decimalPlaces() > 2 after parsing — so scientific
+ * notation ('15e-4' = 0.0015 = 4dp) is caught too, not just literal '0.014'.
  */
 export class AmountScaleError extends Error {
   constructor(
@@ -53,5 +56,21 @@ export class AmountScaleError extends Error {
       `Line ${index} (account "${accountCode}") amount "${amount}" has more than 2 decimal places; storage scale is NUMERIC(14, 2)`,
     );
     this.name = 'AmountScaleError';
+  }
+}
+
+/**
+ * Amount string couldn't be parsed as a number by Prisma.Decimal. Distinct
+ * from AmountScaleError so callers can discriminate "bad input format" from
+ * "valid number, just too precise."
+ */
+export class InvalidAmountError extends Error {
+  constructor(
+    public readonly accountCode: string,
+    public readonly amount: string,
+    public readonly index: number,
+  ) {
+    super(`Line ${index} (account "${accountCode}") amount "${amount}" is not a valid number`);
+    this.name = 'InvalidAmountError';
   }
 }
