@@ -16,15 +16,46 @@ model HealthCheck {
 }
 
 model User {
-  id           String     @id @default(uuid())
-  email        String     @unique
-  passwordHash String     @map("password_hash")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
-  sessions     Session[]
-  roles        UserRole[]
+  id              String   @id @default(uuid())
+  email           String   @unique
+  passwordHash    String   @map("password_hash")
+  phone           String?
+  // Sensitive PII (UAE Emirates ID). Stored encrypted at the application layer:
+  // emiratesIdEnc is ciphertext bytes, emiratesIdHash is a deterministic SHA-256
+  // of plaintext for uniqueness + lookups without decryption. Both are populated
+  // together via helpers in @markaz/auth, which THROW until Week 3 wires real
+  // crypto. No plaintext column exists, so it cannot be misused.
+  emiratesIdEnc   Bytes?   @map("emirates_id_enc")
+  emiratesIdHash  String?  @unique @map("emirates_id_hash")
+  residencyStatus String?  @map("residency_status")
+  // Nullable in this migration; the migration's SQL backfills a Party row for
+  // every existing User. Week 2 flips this to required once backfill is proven.
+  partyId         String?  @unique @map("party_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  party             Party?     @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  sessions          Session[]
+  roles             UserRole[]
+  uploadedDocuments Document[]
 
   @@map("user")
+}
+
+model Party {
+  id        String   @id @default(uuid())
+  // 'person' for Week 1+2 (a registered User). 'entity' / 'spv' / 'trust' arrive
+  // with Invest. The schema doesn't constrain this column. The app-level
+  // INTERNAL_KINDS constant + Zod do. Adding a kind is config, not migration.
+  kind      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user        User?
+  ownerships  Ownership[]
+  buyerOffers Offer[]
+
+  @@index([kind])
+  @@map("party")
 }
 
 model Session {
@@ -76,4 +107,188 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@map("role_permission")
+}
+
+model Property {
+  id        String   @id @default(uuid())
+  // 'apartment' | 'villa' | 'townhouse' | 'commercial'. String, not enum: adding
+  // a type is config, not migration.
+  type      String
+  // 0 for studio; 1+ for apartments / villas.
+  bedrooms  Int
+  sizeSqft  Decimal  @db.Decimal(10, 2) @map("size_sqft")
+  // Free-form for the pilot. Week 4+ may structure into community / building /
+  // Plus Code when the search story is shaped.
+  location  String
+  // The DLD identifier for the property. A Title Deed number for ready property,
+  // an Oqood number for off-plan. Stored with deedType so the same string in two
+  // registries doesn't collide.
+  deedRef   String   @map("deed_ref")
+  // 'TitleDeed' | 'Oqood'.
+  deedType  String   @map("deed_type")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  ownerships Ownership[]
+  listings   Listing[]
+  documents  Document[]
+
+  @@unique([deedRef, deedType])
+  @@index([type])
+  @@index([location])
+  @@map("property")
+}
+
+model Ownership {
+  id         String   @id @default(uuid())
+  propertyId String   @map("property_id")
+  // FK to Party (never to User directly). When Invest arrives, an SPV's Party
+  // row sits here without any schema change to this table. Rule 2 satisfied
+  // literally: zero columns on Ownership change when Entity lands.
+  ownerId    String   @map("owner_id")
+  // 0..1 fractional share. Sum across a property = 1.
+  //
+  // Sum-to-1 rule (enforced in app code at the write site, not the DB):
+  // last-owner-takes-remainder. The caller supplies shares for the first N-1
+  // owners; the share of the most-recently-inserted owner (MAX createdAt) is
+  // computed as 1 - sum(others). Three-way splits close exactly:
+  // 0.33333333 + 0.33333333 + 0.33333334 = 1.00000000. Helper lands when
+  // Ownership writes happen for real (Week 2+).
+  share      Decimal  @db.Decimal(10, 8)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  owner    Party    @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+
+  // Each Party can own a given Property at most once. Joint owners are distinct
+  // Parties with their own rows, not the same Party with multiple ownership rows.
+  @@unique([propertyId, ownerId])
+  @@index([propertyId])
+  @@index([ownerId])
+  @@map("ownership")
+}
+
+model Listing {
+  id                   String   @id @default(uuid())
+  propertyId           String   @map("property_id")
+  // AED. Decimal(14, 2) covers up to 999 billion AED with 2 fractional places.
+  askingPrice          Decimal  @db.Decimal(14, 2) @map("asking_price")
+  // 'Draft' | 'PendingDocuments' | 'PendingOwnershipReview' | 'PendingSignature'
+  // | 'PendingPermit' | 'Live' | 'UnderOffer' | 'Sold' | 'Withdrawn' | 'Rejected'.
+  // String + app/config validation; never an enum (config-driven engine).
+  status               String
+  // 'SelfService' for pilot. Premium tier deferred.
+  tier                 String   @default("SelfService")
+  minNotificationPrice Decimal? @db.Decimal(14, 2) @map("min_notification_price")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  property    Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  offers      Offer[]
+  transaction Transaction?
+  documents   Document[]
+
+  @@index([propertyId])
+  @@index([status])
+  @@map("listing")
+}
+
+model Offer {
+  id              String   @id @default(uuid())
+  listingId       String   @map("listing_id")
+  // FK to Party (not User). Consistent with the Invest-ready pattern: an entity
+  // could be a buyer later. Today it's always a person Party.
+  buyerId         String   @map("buyer_id")
+  amount          Decimal  @db.Decimal(14, 2)
+  // 'cash' | 'mortgage'.
+  financingMethod String   @map("financing_method")
+  // 'submitted' | 'countered' | 'accepted' | 'rejected' | 'expired' | 'withdrawn'.
+  status          String
+  // The 48-hour expiry from the H-004 offer flow lives in this column.
+  expiresAt       DateTime @map("expires_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  listing     Listing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer       Party        @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  transaction Transaction?
+
+  @@index([listingId])
+  @@index([buyerId])
+  @@index([status])
+  // For the expiry sweep job (Week 5+): WHERE expiresAt < now() AND status = 'submitted'.
+  @@index([expiresAt])
+  @@map("offer")
+}
+
+model Transaction {
+  id        String   @id @default(uuid())
+  listingId String   @unique @map("listing_id")
+  offerId   String   @unique @map("offer_id")
+  // 'MOU_pending' | 'Deposit_pending' | 'NOC_pending' | 'Transfer_pending' |
+  // 'Handover_pending' | 'Completed' | 'Collapsed'.
+  status    String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  listing   Listing    @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  offer     Offer      @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  documents Document[]
+
+  @@index([status])
+  @@map("transaction")
+}
+
+model Document {
+  id            String   @id @default(uuid())
+  // 'TitleDeed' | 'Oqood' | 'FormA' | 'FormF' | 'EmiratesId' | 'Photo' | 'NOC' | ...
+  type          String
+  // Path / key in object storage. Storage adapter (Block H+) resolves to a
+  // signed URL on read.
+  storageKey    String   @map("storage_key")
+  // 'parties' | 'operations' | 'compliance'. Buyers NEVER see Title Deeds,
+  // Emirates IDs, or Form A. RBAC enforces by reading this column.
+  accessLevel   String   @map("access_level")
+  uploadedById  String   @map("uploaded_by_id")
+
+  // Exactly one of the next three is set. Enforced at the app layer (helper) AND
+  // at the DB layer (CHECK constraint added in the migration SQL).
+  propertyId    String?  @map("property_id")
+  listingId     String?  @map("listing_id")
+  transactionId String?  @map("transaction_id")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  uploadedBy  User         @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  property    Property?    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  listing     Listing?     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([listingId])
+  @@index([transactionId])
+  @@index([type])
+  @@map("document")
+}
+
+model Event {
+  id            String   @id @default(uuid())
+  // 'listing' | 'transaction' | 'offer' for Week 2+. Future Invest aggregates
+  // ('invest_fundraise', 'invest_exit') append without schema change.
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  fromState     String?  @map("from_state")
+  toState       String   @map("to_state")
+  // Plain string, NOT an FK. This row is append-only: an FK with onDelete:
+  // SetNull would mutate the row when the actor is deleted, breaking audit
+  // semantics. Resolve to a User at read-time if still findable; otherwise
+  // the ID stands as "this is who acted at the time" forever.
+  actorId       String?  @map("actor_id")
+  reason        String?
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([aggregateType, aggregateId])
+  @@index([createdAt])
+  @@map("event")
 }

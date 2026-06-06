@@ -1,4 +1,5 @@
 export { hashPassword, verifyPassword } from './password';
+export { encryptEmiratesId, hashEmiratesId } from './encryption';
 export {
   generateSessionToken,
   hashSessionToken,

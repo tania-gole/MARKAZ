@@ -1,7 +1,24 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { db } from '@markaz/db';
+import type { Prisma } from '@prisma/client';
 
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+// Single source of truth for which User fields ever leave this module.
+// passwordHash, emiratesIdEnc, emiratesIdHash are deliberately excluded.
+// When User gains a new field, this constant + the destructure in operations.ts
+// are the two places to audit.
+export const PUBLIC_USER_SELECT = {
+  id: true,
+  email: true,
+  phone: true,
+  residencyStatus: true,
+  partyId: true,
+  createdAt: true,
+  updatedAt: true,
+} as const satisfies Prisma.UserSelect;
+
+export type PublicUser = Prisma.UserGetPayload<{ select: typeof PUBLIC_USER_SELECT }>;
 
 export function generateSessionToken(): { token: string; tokenHash: string } {
   const token = randomBytes(32).toString('base64url');
@@ -27,9 +44,7 @@ export async function validateSessionToken(rawToken: string) {
   const session = await db.session.findUnique({
     where: { tokenHash },
     include: {
-      user: {
-        select: { id: true, email: true, createdAt: true, updatedAt: true },
-      },
+      user: { select: PUBLIC_USER_SELECT },
     },
   });
   if (!session) return null;
