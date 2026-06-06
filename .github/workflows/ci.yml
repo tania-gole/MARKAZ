@@ -12,12 +12,25 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint · Typecheck · Test · Build
+    name: Lint · Typecheck · Test · Build · Integration
     runs-on: ubuntu-latest
-    # No Postgres service yet — Prisma generate runs via postinstall (no DB needed)
-    # and the landing page is dynamic, so next build doesn't connect either.
-    # When DB-backed tests land (Week 2+), add `services: postgres:` here and
-    # a DATABASE_URL env var pointing at it.
+    # Postgres service for DB-backed integration tests (Block H onward).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: markaz
+          POSTGRES_PASSWORD: markaz_dev
+          POSTGRES_DB: markaz_dev
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U markaz -d markaz_dev"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://markaz:markaz_dev@localhost:5433/markaz_dev?schema=public
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,6 +47,9 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Migrate database
+        run: pnpm --filter @markaz/db exec prisma migrate deploy
+
       - name: Lint
         run: pnpm turbo run lint
 
@@ -45,3 +61,6 @@ jobs:
 
       - name: Build
         run: pnpm turbo run build
+
+      - name: Integration tests
+        run: pnpm turbo run test:integration

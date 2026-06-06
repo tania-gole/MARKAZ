@@ -10,11 +10,13 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --config vitest.integration.config.ts --passWithNoTests",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
     "@markaz/db": "workspace:*",
-    "@markaz/types": "workspace:*"
+    "@markaz/types": "workspace:*",
+    "@prisma/client": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"
