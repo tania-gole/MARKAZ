@@ -12,6 +12,7 @@
     "clean": "rm -rf .next dist .turbo"
   },
   "dependencies": {
+    "@markaz/auth": "workspace:*",
     "@markaz/core": "workspace:*",
     "@markaz/types": "workspace:*",
     "next": "^15.0.0",
